@@ -3,6 +3,7 @@
 Implementation of the Spliit API client.
 """
 
+from functools import partial
 import json
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple, Union, Any
@@ -209,9 +210,11 @@ class Spliit:
         params = {"batch": "1", "input": json.dumps(params_input)}
 
         response = await hass.async_add_executor_job(
-            requests.get,
-            f"{self.base_url}/groups.get,groups.getDetails",
-            params=params
+            partial(
+                requests.get,
+                f"{self.base_url}/groups.get,groups.getDetails",
+                params=params,
+            )
         )
         response.raise_for_status()
         return response.json()[0]["result"]["data"]["json"]["group"]
@@ -239,9 +242,9 @@ class Spliit:
         params = {"batch": "1", "input": json.dumps(params_input)}
 
         response = await hass.async_add_executor_job(
-            requests.get,
-            f"{self.base_url}/groups.expenses.list",
-            params=params
+            partial(
+                requests.get, f"{self.base_url}/groups.expenses.list", params=params
+            )
         )
         response.raise_for_status()
         return response.json()[0]["result"]["data"]["json"]["expenses"]
@@ -263,9 +266,7 @@ class Spliit:
         params = {"batch": "1", "input": json.dumps(params_input)}
 
         response = await hass.async_add_executor_job(
-            requests.get,
-            f"{self.base_url}/groups.expenses.get",
-            params=params
+            partial(requests.get, f"{self.base_url}/groups.expenses.get", params=params)
         )
         response.raise_for_status()
         return response.json()[0]["result"]["data"]["json"]["expense"]
@@ -316,10 +317,12 @@ class Spliit:
         print(json.dumps(json_data, indent=2))
 
         response = await hass.async_add_executor_job(
-            requests.post,
-            f"{self.base_url}/groups.expenses.create",
-            params=params,
-            json=json_data
+            partial(
+                requests.post,
+                f"{self.base_url}/groups.expenses.create",
+                params=params,
+                json=json_data,
+            )
         )
 
         print("\nDebug: Response status:", response.status_code)
@@ -342,10 +345,12 @@ class Spliit:
         json_data = {"0": {"json": {"groupId": self.group_id, "expenseId": expense_id}}}
 
         response = await hass.async_add_executor_job(
-            requests.post,
-            f"{self.base_url}/groups.expenses.delete",
-            params=params,
-            json=json_data
+            partial(
+                requests.post,
+                f"{self.base_url}/groups.expenses.delete",
+                params=params,
+                json=json_data,
+            )
         )
         response.raise_for_status()
         return response.json()[0]["result"]["data"]["json"]
