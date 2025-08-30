@@ -1,0 +1,51 @@
+create_expense:
+  name: Create expense
+  description: Create an expense in a Spliit group.
+  fields:
+    config_entry_id:
+      name: Config Entry ID
+      description: Optional: choose a specific Spliit config entry (use if you have multiple).
+      required: false
+    group_id:
+      name: Group ID
+      description: The Spliit group ID.
+      required: true
+      example: "grp_1234abcd"
+    title:
+      name: Title
+      description: Expense title.
+      required: true
+      example: "Groceries"
+    amount:
+      name: Amount (in cents)
+      description: Total amount in the smallest currency unit (e.g., cents).
+      required: true
+      example: 1299
+      selector:
+        number:
+          min: 1
+          mode: box
+          step: 1
+    paid_by:
+      name: Paid by (name or user id)
+      description: Display name (resolved to ID) or a direct Spliit user id.
+      required: true
+      example: "Alice"
+    paid_for:
+      name: Paid for (list of 'name:amount' pairs)
+      description: >
+        If omitted, splits evenly among group participants.
+        To specify exact splits, pass a list like ["Alice:799","Bob:500"] (amounts are in cents).
+      required: false
+      example:
+        - "Alice:799"
+        - "Bob:500"
+    category_path:
+      name: Category path
+      description: Optional category path in the CATEGORIES map, like "Food & Drinks/Groceries".
+      required: false
+      example: "Food & Drinks/Groceries"
+    note:
+      name: Note
+      description: Optional note for the expense.
+      required: false
