@@ -3,7 +3,7 @@
   "name": "Spliit",
   "version": "0.3.0",
   "documentation": "https://github.com/spliit-app/spliit",
-  "requirements": ["spliit-api-client>=0.1.5"],
+  "requirements": [],
   "config_flow": true,
   "iot_class": "cloud_polling",
   "codeowners": []
