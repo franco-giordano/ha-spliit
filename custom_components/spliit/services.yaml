@@ -6,11 +6,6 @@ create_expense:
       name: Config Entry ID
       description: Optional: choose a specific Spliit config entry (use if you have multiple).
       required: false
-    group_id:
-      name: Group ID
-      description: The Spliit group ID.
-      required: true
-      example: "grp_1234abcd"
     title:
       name: Title
       description: Expense title.

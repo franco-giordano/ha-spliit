@@ -199,7 +199,7 @@ class Spliit:
         group_id = response.json()[0]["result"]["data"]["json"]["groupId"]
         return cls(group_id=group_id, server_url=server_url)
 
-    def get_group(self) -> Dict:
+    async def get_group(self, hass) -> Dict:
         """Get group details."""
         params_input = {
             "0": {"json": {"groupId": self.group_id}},
@@ -208,39 +208,47 @@ class Spliit:
 
         params = {"batch": "1", "input": json.dumps(params_input)}
 
-        response = requests.get(
-            f"{self.base_url}/groups.get,groups.getDetails", params=params
+        response = await hass.async_add_executor_job(
+            requests.get,
+            f"{self.base_url}/groups.get,groups.getDetails",
+            None,
+            params
         )
         response.raise_for_status()
         return response.json()[0]["result"]["data"]["json"]["group"]
 
-    def get_username_id(self, name: str) -> Optional[str]:
+    async def get_username_id(self, hass, name: str) -> Optional[str]:
         """Get participant ID by name."""
-        group = self.get_group()
+        group = await self.get_group(hass)
         for participant in group["participants"]:
             if name == participant["name"]:
                 return participant["id"]
         return None
 
-    def get_participants(self) -> Dict[str, str]:
+    async def get_participants(self, hass) -> Dict[str, str]:
         """Get all participants with their IDs."""
-        group = self.get_group()
+        group = await self.get_group(hass)
         return {
             participant["name"]: participant["id"]
             for participant in group["participants"]
         }
 
-    def get_expenses(self) -> List[Dict]:
+    async def get_expenses(self, hass) -> List[Dict]:
         """Get all expenses in the group."""
         params_input = {"0": {"json": {"groupId": self.group_id}}}
 
         params = {"batch": "1", "input": json.dumps(params_input)}
 
-        response = requests.get(f"{self.base_url}/groups.expenses.list", params=params)
+        response = await hass.async_add_executor_job(
+            requests.get,
+            f"{self.base_url}/groups.expenses.list",
+            None,
+            params
+        )
         response.raise_for_status()
         return response.json()[0]["result"]["data"]["json"]["expenses"]
 
-    def get_expense(self, expense_id: str) -> Dict:
+    async def get_expense(self, hass, expense_id: str) -> Dict:
         """
         Get details of a specific expense.
 
@@ -256,12 +264,18 @@ class Spliit:
 
         params = {"batch": "1", "input": json.dumps(params_input)}
 
-        response = requests.get(f"{self.base_url}/groups.expenses.get", params=params)
+        response = await hass.async_add_executor_job(
+            requests.get,
+            f"{self.base_url}/groups.expenses.get",
+            None,
+            params
+        )
         response.raise_for_status()
         return response.json()[0]["result"]["data"]["json"]["expense"]
 
-    def add_expense(
+    async def add_expense(
         self,
+        hass,
         title: str,
         amount: int,
         paid_by: str,
@@ -304,8 +318,13 @@ class Spliit:
         print("\nDebug: Request payload:")
         print(json.dumps(json_data, indent=2))
 
-        response = requests.post(
-            f"{self.base_url}/groups.expenses.create", params=params, json=json_data
+        response = await hass.async_add_executor_job(
+            requests.post,
+            f"{self.base_url}/groups.expenses.create",
+            None,
+            params,
+            None,
+            json_data
         )
 
         print("\nDebug: Response status:", response.status_code)
@@ -314,7 +333,7 @@ class Spliit:
         response.raise_for_status()
         return response.content.decode()
 
-    def remove_expense(self, expense_id: str) -> Dict:
+    async def remove_expense(self, hass, expense_id: str) -> Dict:
         """
         Remove an expense from the group.
 
@@ -327,8 +346,13 @@ class Spliit:
         params = {"batch": "1"}
         json_data = {"0": {"json": {"groupId": self.group_id, "expenseId": expense_id}}}
 
-        response = requests.post(
-            f"{self.base_url}/groups.expenses.delete", params=params, json=json_data
+        response = await hass.async_add_executor_job(
+            requests.post,
+            f"{self.base_url}/groups.expenses.delete",
+            None,
+            params,
+            None,
+            json_data
         )
         response.raise_for_status()
         return response.json()[0]["result"]["data"]["json"]

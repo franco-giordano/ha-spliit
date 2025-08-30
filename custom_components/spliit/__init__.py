@@ -20,7 +20,6 @@ SERVICE_CREATE_EXPENSE = "create_expense"
 SERVICE_SCHEMA = vol.Schema(
     {
         vol.Optional("config_entry_id"): cv.string,
-        vol.Required("group_id"): cv.string,
         vol.Required("title"): cv.string,
         vol.Required("amount"): vol.All(int, vol.Range(min=1)),  # cents
         vol.Required("paid_by"): cv.string,
@@ -38,7 +37,7 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     return True
 
 
-def _build_client(group_id: str, base_url: str):
+def _build_client(group_id: str, base_url: str) -> Spliit:
     """Instantiate the Spliit client, being tolerant to keyword naming."""
     base_url = base_url.rstrip("/")
     return Spliit(group_id=group_id, server_url=base_url)
@@ -62,14 +61,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         DOMAIN, {}
     ):
 
-        async def _find_user_id_by_name(client, name_or_id: str) -> str:
+        async def _find_user_id_by_name(client: Spliit, name_or_id: str) -> str:
             """Resolve a display name to id by scanning participants. Fallback to the input."""
             name = str(name_or_id).strip()
             try:
-                participants = client.get_participants()
-                for p in participants:
-                    pid = p.get("id") or p.get("_id") or p.get("userId")
-                    pname = (p.get("name") or p.get("username") or "").strip()
+                participants = await client.get_participants(hass)
+                for pname, pid in participants:
                     if pname and pname.lower() == name.lower():
                         return pid
             except Exception as err:
@@ -99,9 +96,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             else:
                 entry_store = next(iter(store.values()))
 
-            client = entry_store["client"]
+            client: Spliit = entry_store["client"]
+            group_id: str = entry_store["group_id"]
 
-            group_id: str = data["group_id"]
             title: str = data["title"]
             amount: int = data["amount"]
             paid_by_in: str = data["paid_by"]
@@ -128,38 +125,26 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     paid_for.append((uid, value))
             else:
                 # EVENLY: use 1 share per participant
-                participants = client.get_participants()
+                participants = await client.get_participants(hass)
                 if not participants:
                     raise vol.Invalid(
                         "No participants found in the group to split evenly."
                     )
                 paid_for = []
-                for p in participants:
-                    uid = p.get("id") or p.get("_id") or p.get("userId")
-                    paid_for.append((uid, 1))
+                for pname, pid in participants:
+                    paid_for.append((pid, 1))
                 split_mode = SplitMode.EVENLY
 
             # Create the expense
-            try:
-                client.add_expense(
-                    title=title,
-                    paid_by=paid_by,
-                    paid_for=paid_for,
-                    amount=amount,
-                    split_mode=split_mode,
-                    notes=note,
-                    group_id=group_id,
-                )
-            except TypeError:
-                # Older signatures without group_id kwarg
-                client.add_expense(
-                    title=title,
-                    paid_by=paid_by,
-                    paid_for=paid_for,
-                    amount=amount,
-                    split_mode=split_mode,
-                    notes=note,
-                )
+            await client.add_expense(
+                hass,
+                title=title,
+                paid_by=paid_by,
+                paid_for=paid_for,
+                amount=amount,
+                split_mode=split_mode,
+                notes=str(note),
+            )
 
             _LOGGER.info(
                 "Spliit: created expense '%s' amount=%s split=%s group=%s",
