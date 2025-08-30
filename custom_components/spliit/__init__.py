@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, List, Tuple
+from typing import Any, Dict, List, Tuple
 
 import voluptuous as vol
 
@@ -10,8 +10,9 @@ from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.helpers.typing import ConfigType
 import homeassistant.helpers.config_validation as cv
 
-# Spliit client lib
-from spliit import Spliit, CATEGORIES
+# Using the spliit-api-client package
+from spliit.client import Spliit
+from spliit.utils import SplitMode
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -25,8 +26,8 @@ SERVICE_SCHEMA = vol.Schema(
         vol.Required("title"): cv.string,
         vol.Required("amount"): vol.All(int, vol.Range(min=1)),  # cents
         vol.Required("paid_by"): cv.string,
-        vol.Optional("paid_for"): vol.All(list, [cv.string]),
-        vol.Optional("category_path"): cv.string,
+        vol.Optional("paid_for"): vol.All(list, [cv.string]),    # ["Alice:600","Bob:600"]
+        vol.Optional("split_mode", default="EVENLY"): vol.In({"EVENLY","BY_PERCENTAGE","BY_AMOUNT","BY_SHARES"}),
         vol.Optional("note"): cv.string,
     }
 )
@@ -36,11 +37,12 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     return True
 
 def _build_client(group_id: str, base_url: str) -> Spliit:
+    """Instantiate the Spliit client, being tolerant to keyword naming."""
     base_url = base_url.rstrip("/")
     try:
         return Spliit(group_id=group_id, base_url=base_url)
     except TypeError:
-        # Fallback for forks that use `api_url`
+        # Some forks used `api_url`
         return Spliit(group_id=group_id, api_url=base_url)
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -56,20 +58,36 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     }
 
     if f"{DOMAIN}.{SERVICE_CREATE_EXPENSE}" not in hass.services.async_services().get(DOMAIN, {}):
-        async def _resolve_user_id(client: Spliit, identifier: str) -> str:
+        async def _find_user_id_by_name(client: Spliit, name_or_id: string) -> str:
+            """Resolve a display name to a participant id by scanning the group list.
+            If not found, assume the caller already passed an id."""
+            name = str(name_or_id).strip()
             try:
-                uid = client.get_username_id(identifier)
-                if uid:
-                    return uid
+                participants = client.get_participants()
+                for p in participants:
+                    # p example is expected to have at least id + name
+                    pid = p.get("id") or p.get("_id") or p.get("userId")
+                    pname = (p.get("name") or p.get("username") or "").strip()
+                    if pname.lower() == name.lower():
+                        return pid
             except Exception as err:
-                _LOGGER.debug("Name lookup failed for %s: %s (falling back to raw)", identifier, err)
-            return identifier
+                _LOGGER.debug("Could not fetch participants to resolve name '%s': %s", name, err)
+            return name  # fallback (likely already an id)
+
+        def _parse_paid_for(items: List[str]) -> List[Tuple[str, int]]:
+            """Parse ['Alice:600','Bob:600'] -> [(id_or_name, 600), ...] (value kept as int)."""
+            result: List[Tuple[str, int]] = []
+            for item in items:
+                name_or_id, val = item.split(":", 1)
+                result.append((name_or_id.strip(), int(val.strip())))
+            return result
 
         async def _create_expense(call: ServiceCall) -> None:
             data = call.data
-            sel_entry_id = data.get("config_entry_id")
             store = hass.data[DOMAIN]
 
+            # choose entry
+            sel_entry_id = data.get("config_entry_id")
             if sel_entry_id:
                 entry_store = store.get(sel_entry_id)
                 if not entry_store:
@@ -84,67 +102,65 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             amount: int = data["amount"]
             paid_by_in: str = data["paid_by"]
             paid_for_in: List[str] | None = data.get("paid_for")
-            category_path: str | None = data.get("category_path")
+            split_mode_in: str = data.get("split_mode", "EVENLY")
             note: str | None = data.get("note")
 
-            paid_by = await _resolve_user_id(client, paid_by_in)
+            # Map to SplitMode enum
+            split_mode = {
+                "EVENLY": SplitMode.EVENLY,
+                "BY_PERCENTAGE": SplitMode.BY_PERCENTAGE,
+                "BY_AMOUNT": SplitMode.BY_AMOUNT,
+                "BY_SHARES": SplitMode.BY_SHARES,
+            }[split_mode_in]
 
+            # Resolve payer id
+            paid_by = await _find_user_id_by_name(client, paid_by_in)
+
+            # Build paid_for list depending on mode
             if paid_for_in:
+                raw_pairs = _parse_paid_for(paid_for_in)
                 paid_for: List[Tuple[str, int]] = []
-                for item in paid_for_in:
-                    try:
-                        name_or_id, amt_str = item.split(":", 1)
-                        uid = await _resolve_user_id(client, name_or_id.strip())
-                        paid_for.append((uid, int(amt_str.strip())))
-                    except Exception as err:
-                        raise vol.Invalid(f"Invalid paid_for item '{item}': {err}") from err
+                for name_or_id, value in raw_pairs:
+                    uid = await _find_user_id_by_name(client, name_or_id)
+                    paid_for.append((uid, value))
             else:
+                # EVENLY across all participants when nothing provided
                 participants = client.get_participants()
                 if not participants:
                     raise vol.Invalid("No participants found in the group to split evenly.")
-                share = amount // len(participants)
-                remainder = amount % len(participants)
                 paid_for = []
-                for idx, p in enumerate(participants):
-                    uid = p.get("id") or await _resolve_user_id(client, p.get("name", ""))
-                    paid_for.append((uid, share + (1 if idx < remainder else 0)))
+                for p in participants:
+                    uid = p.get("id") or p.get("_id") or p.get("userId")
+                    # For EVENLY mode, share values are ignored; pass 1 for each
+                    paid_for.append((uid, 1))
+                split_mode = SplitMode.EVENLY
 
-            category_value = None
-            if category_path:
-                try:
-                    parts = [x.strip() for x in category_path.split("/") if x.strip()]
-                    node: Any = CATEGORIES
-                    for part in parts[:-1]:
-                        node = node[part]
-                    category_value = node[parts[-1]]
-                except Exception as err:
-                    _LOGGER.warning(
-                        "Category path '%s' not found: %s; continuing without category.",
-                        category_path, err
-                    )
-
+            # Create the expense
             try:
+                # Prefer passing group_id if client supports it; otherwise rely on client.group_id
                 client.add_expense(
                     title=title,
                     paid_by=paid_by,
                     paid_for=paid_for,
                     amount=amount,
-                    category=category_value,
-                    note=note,
+                    split_mode=split_mode,
+                    notes=note,
                     group_id=group_id
                 )
             except TypeError:
-                # Older signatures without group_id kwarg
                 client.add_expense(
                     title=title,
                     paid_by=paid_by,
                     paid_for=paid_for,
                     amount=amount,
-                    category=category_value,
-                    note=note,
+                    split_mode=split_mode,
+                    notes=note,
                 )
 
-            _LOGGER.info("Spliit: created expense '%s' amount=%s in group %s", title, amount, group_id)
+            _LOGGER.info(
+                "Spliit: created expense '%s' amount=%s split=%s group=%s",
+                title, amount, split_mode_in, group_id
+            )
 
         hass.services.async_register(DOMAIN, SERVICE_CREATE_EXPENSE, _create_expense, schema=SERVICE_SCHEMA)
 

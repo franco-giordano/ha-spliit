@@ -32,19 +32,28 @@ create_expense:
       required: true
       example: "Alice"
     paid_for:
-      name: Paid for (list of 'name:amount' pairs)
+      name: Paid for (list of 'name_or_id:value' pairs)
       description: >
-        If omitted, splits evenly among group participants.
-        To specify exact splits, pass a list like ["Alice:799","Bob:500"] (amounts are in cents).
+        When split_mode is BY_PERCENTAGE, values are percents (sum to 100).
+        When BY_AMOUNT, values are in cents (sum to total).
+        When BY_SHARES, values are share units (positive integers).
+        If omitted with split_mode EVENLY (default), the integration splits among all group participants.
       required: false
       example:
-        - "Alice:799"
-        - "Bob:500"
-    category_path:
-      name: Category path
-      description: Optional category path in the CATEGORIES map, like "Food & Drinks/Groceries".
+        - "Alice:60"
+        - "Bob:40"
+    split_mode:
+      name: Split mode
+      description: EVENLY (default), BY_PERCENTAGE, BY_AMOUNT, or BY_SHARES.
       required: false
-      example: "Food & Drinks/Groceries"
+      example: "BY_AMOUNT"
+      selector:
+        select:
+          options:
+            - EVENLY
+            - BY_PERCENTAGE
+            - BY_AMOUNT
+            - BY_SHARES
     note:
       name: Note
       description: Optional note for the expense.

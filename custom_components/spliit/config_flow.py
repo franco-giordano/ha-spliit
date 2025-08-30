@@ -39,7 +39,6 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return self.async_show_form(step_id="user", data_schema=STEP_USER_DATA_SCHEMA, errors=errors)
 
     async def async_step_import(self, user_input: dict[str, Any]) -> FlowResult:
-        # Optional YAML import support if ever needed
         return await self.async_step_user(user_input)
 
 class OptionsFlowHandler(config_entries.OptionsFlow):
