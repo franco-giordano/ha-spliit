@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Tuple
+import importlib
+from typing import Any, List, Tuple
 
 import voluptuous as vol
 
@@ -9,10 +10,6 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.helpers.typing import ConfigType
 import homeassistant.helpers.config_validation as cv
-
-# Using the spliit-api-client package
-from spliit.client import Spliit
-from spliit.utils import SplitMode
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -36,8 +33,19 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     hass.data.setdefault(DOMAIN, {})
     return True
 
-def _build_client(group_id: str, base_url: str) -> Spliit:
+def _import_client():
+    """
+    Import the client lazily so config_flow can load even if the wheel isn't installed yet.
+    Returns (SpliitClass, SplitModeEnum).
+    """
+    # Package is provided by PyPI project "spliit-api-client", import path is "spliit"
+    mod_client = importlib.import_module("spliit.client")
+    mod_utils = importlib.import_module("spliit.utils")
+    return mod_client.Spliit, mod_utils.SplitMode
+
+def _build_client(group_id: str, base_url: str):
     """Instantiate the Spliit client, being tolerant to keyword naming."""
+    Spliit, _ = _import_client()
     base_url = base_url.rstrip("/")
     try:
         return Spliit(group_id=group_id, base_url=base_url)
@@ -49,6 +57,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     data = {**entry.data, **(entry.options or {})}
     group_id: str = data["group_id"]
     base_url: str = data.get("base_url", "https://spliit.app")
+
     client = _build_client(group_id, base_url)
 
     hass.data[DOMAIN][entry.entry_id] = {
@@ -57,25 +66,24 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "base_url": base_url,
     }
 
+    # Register the service once (first entry loads it)
     if f"{DOMAIN}.{SERVICE_CREATE_EXPENSE}" not in hass.services.async_services().get(DOMAIN, {}):
-        async def _find_user_id_by_name(client: Spliit, name_or_id: string) -> str:
-            """Resolve a display name to a participant id by scanning the group list.
-            If not found, assume the caller already passed an id."""
+        async def _find_user_id_by_name(client, name_or_id: str) -> str:
+            """Resolve a display name to id by scanning participants. Fallback to the input."""
             name = str(name_or_id).strip()
             try:
                 participants = client.get_participants()
                 for p in participants:
-                    # p example is expected to have at least id + name
                     pid = p.get("id") or p.get("_id") or p.get("userId")
                     pname = (p.get("name") or p.get("username") or "").strip()
-                    if pname.lower() == name.lower():
+                    if pname and pname.lower() == name.lower():
                         return pid
             except Exception as err:
                 _LOGGER.debug("Could not fetch participants to resolve name '%s': %s", name, err)
-            return name  # fallback (likely already an id)
+            return name
 
         def _parse_paid_for(items: List[str]) -> List[Tuple[str, int]]:
-            """Parse ['Alice:600','Bob:600'] -> [(id_or_name, 600), ...] (value kept as int)."""
+            """Parse ['Alice:600','Bob:600'] -> [(id_or_name, 600), ...]."""
             result: List[Tuple[str, int]] = []
             for item in items:
                 name_or_id, val = item.split(":", 1)
@@ -83,10 +91,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             return result
 
         async def _create_expense(call: ServiceCall) -> None:
-            data = call.data
             store = hass.data[DOMAIN]
+            data = call.data
 
-            # choose entry
+            # choose a specific configured entry or the first one
             sel_entry_id = data.get("config_entry_id")
             if sel_entry_id:
                 entry_store = store.get(sel_entry_id)
@@ -95,7 +103,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             else:
                 entry_store = next(iter(store.values()))
 
-            client: Spliit = entry_store["client"]
+            client = entry_store["client"]
 
             group_id: str = data["group_id"]
             title: str = data["title"]
@@ -105,7 +113,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             split_mode_in: str = data.get("split_mode", "EVENLY")
             note: str | None = data.get("note")
 
-            # Map to SplitMode enum
+            # Map to SplitMode enum (import lazily here too)
+            _, SplitMode = _import_client()
             split_mode = {
                 "EVENLY": SplitMode.EVENLY,
                 "BY_PERCENTAGE": SplitMode.BY_PERCENTAGE,
@@ -113,10 +122,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 "BY_SHARES": SplitMode.BY_SHARES,
             }[split_mode_in]
 
-            # Resolve payer id
+            # Resolve payer
             paid_by = await _find_user_id_by_name(client, paid_by_in)
 
-            # Build paid_for list depending on mode
+            # Build paid_for
             if paid_for_in:
                 raw_pairs = _parse_paid_for(paid_for_in)
                 paid_for: List[Tuple[str, int]] = []
@@ -124,20 +133,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     uid = await _find_user_id_by_name(client, name_or_id)
                     paid_for.append((uid, value))
             else:
-                # EVENLY across all participants when nothing provided
+                # EVENLY: use 1 share per participant
                 participants = client.get_participants()
                 if not participants:
                     raise vol.Invalid("No participants found in the group to split evenly.")
                 paid_for = []
                 for p in participants:
                     uid = p.get("id") or p.get("_id") or p.get("userId")
-                    # For EVENLY mode, share values are ignored; pass 1 for each
                     paid_for.append((uid, 1))
                 split_mode = SplitMode.EVENLY
 
             # Create the expense
             try:
-                # Prefer passing group_id if client supports it; otherwise rely on client.group_id
                 client.add_expense(
                     title=title,
                     paid_by=paid_by,
@@ -145,9 +152,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     amount=amount,
                     split_mode=split_mode,
                     notes=note,
-                    group_id=group_id
+                    group_id=group_id,
                 )
             except TypeError:
+                # Older signatures without group_id kwarg
                 client.add_expense(
                     title=title,
                     paid_by=paid_by,
