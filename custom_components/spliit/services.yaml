@@ -4,7 +4,7 @@ create_expense:
   fields:
     config_entry_id:
       name: Config Entry ID
-      description: Optional: choose a specific Spliit config entry (use if you have multiple).
+      description: "Optional: choose a specific Spliit config entry (use if you have multiple)."
       required: false
     title:
       name: Title
