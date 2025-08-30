@@ -10,7 +10,7 @@ from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.helpers.typing import ConfigType
 import homeassistant.helpers.config_validation as cv
 
-from spliit.client import Spliit, SplitMode
+from .client import Spliit, SplitMode
 
 _LOGGER = logging.getLogger(__name__)
 
