@@ -66,7 +66,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             name = str(name_or_id).strip()
             try:
                 participants = await client.get_participants(hass)
-                for pname, pid in participants:
+                for pname, pid in participants.items():
                     if pname and pname.lower() == name.lower():
                         return pid
             except Exception as err:
@@ -131,7 +131,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                         "No participants found in the group to split evenly."
                     )
                 paid_for = []
-                for pname, pid in participants:
+                for pname, pid in participants.items():
                     paid_for.append((pid, 1))
                 split_mode = SplitMode.EVENLY
 
