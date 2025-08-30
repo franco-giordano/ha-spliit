@@ -211,8 +211,7 @@ class Spliit:
         response = await hass.async_add_executor_job(
             requests.get,
             f"{self.base_url}/groups.get,groups.getDetails",
-            None,
-            params
+            params=params
         )
         response.raise_for_status()
         return response.json()[0]["result"]["data"]["json"]["group"]
@@ -242,8 +241,7 @@ class Spliit:
         response = await hass.async_add_executor_job(
             requests.get,
             f"{self.base_url}/groups.expenses.list",
-            None,
-            params
+            params=params
         )
         response.raise_for_status()
         return response.json()[0]["result"]["data"]["json"]["expenses"]
@@ -267,8 +265,7 @@ class Spliit:
         response = await hass.async_add_executor_job(
             requests.get,
             f"{self.base_url}/groups.expenses.get",
-            None,
-            params
+            params=params
         )
         response.raise_for_status()
         return response.json()[0]["result"]["data"]["json"]["expense"]
@@ -321,10 +318,8 @@ class Spliit:
         response = await hass.async_add_executor_job(
             requests.post,
             f"{self.base_url}/groups.expenses.create",
-            None,
-            params,
-            None,
-            json_data
+            params=params,
+            json=json_data
         )
 
         print("\nDebug: Response status:", response.status_code)
@@ -349,10 +344,8 @@ class Spliit:
         response = await hass.async_add_executor_job(
             requests.post,
             f"{self.base_url}/groups.expenses.delete",
-            None,
-            params,
-            None,
-            json_data
+            params=params,
+            json=json_data
         )
         response.raise_for_status()
         return response.json()[0]["result"]["data"]["json"]
